@@ -170,7 +170,7 @@ impl Compositor {
             wgpu::Features::SHADER_F16
         } else {
             wgpu::Features::empty()
-        };
+        } | wgpu::Features::SUBGROUP;
 
         let mut errors = Vec::new();
 
