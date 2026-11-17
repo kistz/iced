@@ -172,21 +172,20 @@ impl Compositor {
             wgpu::Features::empty()
         } | wgpu::Features::SUBGROUP;
 
-        // Mesh shaders are requested where the adapter has them, with the
-        // limits it has for them. If the device can not be had like that,
-        // it is requested without them.
-        let mesh_shaders = adapter
-            .features()
-            .contains(wgpu::Features::EXPERIMENTAL_MESH_SHADER);
+        // Mesh shaders and binding arrays of buffers are requested where
+        // the adapter has them, with the limits it has for them. If the
+        // device can not be had like that, it is requested without them.
+        let extras = adapter.features() & EXTRA_FEATURES;
+        let mesh_shaders = extras.contains(wgpu::Features::EXPERIMENTAL_MESH_SHADER);
         let candidates = limits.flat_map(|limits| {
-            let with_mesh_shaders = mesh_shaders.then(|| {
+            let with_extras = (!extras.is_empty()).then(|| {
                 (
-                    required_features | wgpu::Features::EXPERIMENTAL_MESH_SHADER,
-                    with_mesh_shader_limits(limits.clone(), &adapter.limits()),
-                    true,
+                    required_features | extras,
+                    with_extra_limits(limits.clone(), &adapter.limits(), extras),
+                    mesh_shaders,
                 )
             });
-            with_mesh_shaders
+            with_extras
                 .into_iter()
                 .chain([(required_features, limits, false)])
         });
@@ -486,6 +485,53 @@ pub fn present_mode_from_env() -> Option<wgpu::PresentMode> {
     }
 }
 
+/// What is requested on top of what iced needs, where the adapter has it:
+/// mesh shaders, and binding arrays of storage buffers, so that whoever
+/// draws with the device can bind many buffers at once.
+#[cfg(not(target_arch = "wasm32"))]
+const EXTRA_FEATURES: wgpu::Features = wgpu::Features::EXPERIMENTAL_MESH_SHADER
+    .union(wgpu::Features::BUFFER_BINDING_ARRAY)
+    .union(wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY)
+    .union(wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY)
+    .union(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING);
+
+/// On the web there is none of it.
+#[cfg(target_arch = "wasm32")]
+const EXTRA_FEATURES: wgpu::Features = wgpu::Features::empty();
+
+/// `limits` with the limits of the adapter for `extras`.
+#[cfg(not(target_arch = "wasm32"))]
+fn with_extra_limits(
+    limits: wgpu::Limits,
+    adapter: &wgpu::Limits,
+    extras: wgpu::Features,
+) -> wgpu::Limits {
+    let limits = if extras.contains(wgpu::Features::EXPERIMENTAL_MESH_SHADER) {
+        with_mesh_shader_limits(limits, adapter)
+    } else {
+        limits
+    };
+    if extras.contains(wgpu::Features::BUFFER_BINDING_ARRAY) {
+        wgpu::Limits {
+            max_binding_array_elements_per_shader_stage: adapter
+                .max_binding_array_elements_per_shader_stage,
+            ..limits
+        }
+    } else {
+        limits
+    }
+}
+
+/// On the web there are no extras.
+#[cfg(target_arch = "wasm32")]
+fn with_extra_limits(
+    limits: wgpu::Limits,
+    _adapter: &wgpu::Limits,
+    _extras: wgpu::Features,
+) -> wgpu::Limits {
+    limits
+}
+
 /// `limits` with the mesh shader limits of the adapter.
 #[cfg(not(target_arch = "wasm32"))]
 fn with_mesh_shader_limits(limits: wgpu::Limits, adapter: &wgpu::Limits) -> wgpu::Limits {
@@ -505,10 +551,4 @@ fn with_mesh_shader_limits(limits: wgpu::Limits, adapter: &wgpu::Limits) -> wgpu
         max_mesh_multiview_view_count: adapter.max_mesh_multiview_view_count,
         ..limits
     }
-}
-
-/// On the web there are no mesh shaders.
-#[cfg(target_arch = "wasm32")]
-fn with_mesh_shader_limits(limits: wgpu::Limits, _adapter: &wgpu::Limits) -> wgpu::Limits {
-    limits
 }
