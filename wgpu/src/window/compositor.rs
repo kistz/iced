@@ -175,7 +175,7 @@ impl Compositor {
         // Mesh shaders and binding arrays of buffers are requested where
         // the adapter has them, with the limits it has for them. If the
         // device can not be had like that, it is requested without them.
-        let extras = adapter.features() & EXTRA_FEATURES;
+        let extras = adapter.features() & EXTRA_FEATURES & extras_from_env();
         let mesh_shaders = extras.contains(wgpu::Features::EXPERIMENTAL_MESH_SHADER);
         let candidates = limits.flat_map(|limits| {
             let with_extras = (!extras.is_empty()).then(|| {
@@ -498,6 +498,27 @@ const EXTRA_FEATURES: wgpu::Features = wgpu::Features::EXPERIMENTAL_MESH_SHADER
 /// On the web there is none of it.
 #[cfg(target_arch = "wasm32")]
 const EXTRA_FEATURES: wgpu::Features = wgpu::Features::empty();
+
+/// Which of the extras `ICED_WGPU_EXTRAS` allows: a list of `mesh_shaders`
+/// and `binding_arrays` separated by commas, or `none`. All of them where
+/// it is not set.
+fn extras_from_env() -> wgpu::Features {
+    let Ok(value) = std::env::var("ICED_WGPU_EXTRAS") else {
+        return wgpu::Features::all();
+    };
+    let binding_arrays = wgpu::Features::BUFFER_BINDING_ARRAY
+        | wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY
+        | wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY
+        | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+    value
+        .split(',')
+        .map(|extra| match extra.trim() {
+            "mesh_shaders" => wgpu::Features::EXPERIMENTAL_MESH_SHADER,
+            "binding_arrays" => binding_arrays,
+            _ => wgpu::Features::empty(),
+        })
+        .fold(wgpu::Features::empty(), |all, extra| all | extra)
+}
 
 /// `limits` with the limits of the adapter for `extras`.
 #[cfg(not(target_arch = "wasm32"))]
