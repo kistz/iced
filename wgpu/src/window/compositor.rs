@@ -55,11 +55,14 @@ impl Compositor {
     ) -> Result<Self, Error> {
         let instance = wgpu::util::new_instance_with_webgpu_detection(wgpu::InstanceDescriptor {
             backends: settings.backends,
+            // `WGPU_VALIDATION=1` and `WGPU_DEBUG=1` turn on the validation
+            // layers and debug labels of the backend.
             flags: if cfg!(feature = "strict-assertions") {
                 wgpu::InstanceFlags::debugging()
             } else {
                 wgpu::InstanceFlags::empty()
-            },
+            }
+            .with_env(),
             ..wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display))
         })
         .await;
