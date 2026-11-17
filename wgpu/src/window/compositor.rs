@@ -172,9 +172,38 @@ impl Compositor {
             wgpu::Features::empty()
         } | wgpu::Features::SUBGROUP;
 
+        // Mesh shaders are requested where the adapter has them, with the
+        // limits it has for them. If the device can not be had like that,
+        // it is requested without them.
+        let mesh_shaders = adapter
+            .features()
+            .contains(wgpu::Features::EXPERIMENTAL_MESH_SHADER);
+        let candidates = limits.flat_map(|limits| {
+            let with_mesh_shaders = mesh_shaders.then(|| {
+                (
+                    required_features | wgpu::Features::EXPERIMENTAL_MESH_SHADER,
+                    with_mesh_shader_limits(limits.clone(), &adapter.limits()),
+                    true,
+                )
+            });
+            with_mesh_shaders
+                .into_iter()
+                .chain([(required_features, limits, false)])
+        });
+
         let mut errors = Vec::new();
 
-        for required_limits in limits {
+        for (required_features, required_limits, experimental) in candidates {
+            #[allow(unsafe_code)]
+            let experimental_features = if experimental {
+                // SAFETY: mesh shaders are experimental in wgpu. Whoever uses
+                // them checks the features of the device first, and nothing
+                // else in here changes because of them.
+                unsafe { wgpu::ExperimentalFeatures::enabled() }
+            } else {
+                wgpu::ExperimentalFeatures::disabled()
+            };
+
             let result = adapter
                 .request_device(&wgpu::DeviceDescriptor {
                     label: Some("iced_wgpu::window::compositor device descriptor"),
@@ -182,7 +211,7 @@ impl Compositor {
                     required_limits: required_limits.clone(),
                     memory_hints: wgpu::MemoryHints::MemoryUsage,
                     trace: wgpu::Trace::Off,
-                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                    experimental_features,
                 })
                 .await;
 
@@ -455,4 +484,31 @@ pub fn present_mode_from_env() -> Option<wgpu::PresentMode> {
         "mailbox" => Some(wgpu::PresentMode::Mailbox),
         _ => None,
     }
+}
+
+/// `limits` with the mesh shader limits of the adapter.
+#[cfg(not(target_arch = "wasm32"))]
+fn with_mesh_shader_limits(limits: wgpu::Limits, adapter: &wgpu::Limits) -> wgpu::Limits {
+    wgpu::Limits {
+        max_task_workgroup_total_count: adapter.max_task_workgroup_total_count,
+        max_task_workgroups_per_dimension: adapter.max_task_workgroups_per_dimension,
+        max_mesh_workgroup_total_count: adapter.max_mesh_workgroup_total_count,
+        max_mesh_workgroups_per_dimension: adapter.max_mesh_workgroups_per_dimension,
+        max_task_invocations_per_workgroup: adapter.max_task_invocations_per_workgroup,
+        max_task_invocations_per_dimension: adapter.max_task_invocations_per_dimension,
+        max_mesh_invocations_per_workgroup: adapter.max_mesh_invocations_per_workgroup,
+        max_mesh_invocations_per_dimension: adapter.max_mesh_invocations_per_dimension,
+        max_task_payload_size: adapter.max_task_payload_size,
+        max_mesh_output_vertices: adapter.max_mesh_output_vertices,
+        max_mesh_output_primitives: adapter.max_mesh_output_primitives,
+        max_mesh_output_layers: adapter.max_mesh_output_layers,
+        max_mesh_multiview_view_count: adapter.max_mesh_multiview_view_count,
+        ..limits
+    }
+}
+
+/// On the web there are no mesh shaders.
+#[cfg(target_arch = "wasm32")]
+fn with_mesh_shader_limits(limits: wgpu::Limits, _adapter: &wgpu::Limits) -> wgpu::Limits {
+    limits
 }
